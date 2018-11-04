@@ -32,7 +32,7 @@ let getNewsUrl = () => {
                             data.push(newsCollection);
                         });
 
-                        getUrlCallback(data);
+                        getNews(data);
                      }else {
                         console.log(err);
                     }
@@ -51,26 +51,29 @@ let getUrlCallback = (data = []) => {
 }
 
 let getNews = (data) => {
-    data.forEach(function(news){
-        crawlerjs({
-            interval: 1000,
-            getSample: 'https://br.investing.com/news/forex-news/',
-            get: 'https://br.investing.com/news/forex-news/',
-            preview: 0,
-            extractors: [
-                {
-                    selector: '#leftColumn .largeTitle article > a',
-                    callback: function(err,html,url,response) {
-                        if(!err) {
-
-                         }else {
-                            console.log(err);
-                        }
+    crawlerjs({
+        interval: 1000,
+        getSample:'https://br.investing.com/news/forex-news/ilan-defende-cambio-flutuante-e-reservas-para-proteger-economia-brasileira-de-choques-externos-615769',
+        get: 'https://br.investing.com/news/forex-news/ilan-defende-cambio-flutuante-e-reservas-para-proteger-economia-brasileira-de-choques-externos-615769',
+        preview: 0,
+        extractors: [
+            {
+                selector: '#leftColumn .articlePage p',
+                callback: function(err,html,url,response) {
+                    if(!err) {
+                        let newsText = '';
+                        $.each(html, function(i, item){
+                            item.forEach(function(text){
+                                console.log(text.data);
+                            })
+                        });
+                    }else {
+                        console.log(err);
                     }
                 }
-            ]
-        });
+            }
+        ]
     });
 }
 
-getNewsUrl();
+getNews();
