@@ -22,14 +22,14 @@ let getNewsUrl = () => {
                     if(!err) {
                         let data = [];
                         $.each(html, function(i, item){
-                            let linkCouple = {},
+                            let newsCollection = {},
                                 link = 'https://br.investing.com',
                                 fileName = item.attribs.href;
                             
-                            linkCouple.id = item.parent.attribs['data-id'];
-                            linkCouple.name = fileName.split('/')[3];
-                            linkCouple.url = link + item.attribs.href;
-                            data.push(linkCouple);
+                            newsCollection.id = item.parent.attribs['data-id'];
+                            newsCollection.name = fileName.split('/')[3];
+                            newsCollection.url = link + item.attribs.href;
+                            data.push(newsCollection);
                         });
 
                         getUrlCallback(data);
@@ -62,19 +62,7 @@ let getNews = (data) => {
                     selector: '#leftColumn .largeTitle article > a',
                     callback: function(err,html,url,response) {
                         if(!err) {
-                            let data = [];
-                            $.each(html, function(i, item){
-                                let linkCouple = {},
-                                    link = 'https://br.investing.com',
-                                    fileName = item.attribs.href;
-                                
-                                linkCouple.id = item.parent.attribs['data-id'];
-                                linkCouple.name = fileName.split('/')[3];
-                                linkCouple.url = link + item.attribs.href;
-                                data.push(linkCouple);
-                            });
-    
-                            getUrlCallback(data);
+
                          }else {
                             console.log(err);
                         }
