@@ -1,17 +1,35 @@
-var crawlerjs = require('crawler-js');
-var jsdom = require("jsdom");
-var fs = require('fs');
+let crawlerjs = require('crawler-js'),
+    jsdom = require("jsdom"),
+    fs = require('fs');
+
 const { JSDOM } = jsdom;
 const { window } = new JSDOM();
 const { document } = (new JSDOM('')).window;
 
-global.document = document;
-var $ = require('jquery')(window);
-var newsDir = 'news/',
-    logFile = 'crawler.log';
+let $ = require('jquery')(window),
+    newsDir = 'news/',
+    newArticlesDir = 'news/waiting/',
+    sendedArticlesDir = 'news/sended/',
+    resultsArticlesDir = 'news/results/',
+    logFile = 'crawler.log',
+    newsToGet = [],
+    newsUrl = [],
+    newsToAnalyse = [];
 
-let newsToGet = [],
-    newsUrl = [];
+global.document = document;
+
+const urlWatson = 'https://gateway.watsonplatform.net/natural-language-understanding/api',
+      userName = '${username}',
+      pass = '${password}';
+
+var watsonAPI = require('watson-developer-cloud/natural-language-understanding/v1.js');
+var watson = new watsonAPI({
+    version: '2018-11-25',
+    username: `${userName}`,
+    password: `${pass}`,
+    url: `${urlWatson}`
+});
+
 
 let log = (content) => {
     let dateNow = new Date(),
@@ -20,15 +38,20 @@ let log = (content) => {
         year = dateNow.getFullYear(),
         logMessage = '';
 
-    logMessage = `<${day}/${month}/${year} ${dateNow.getHours()}:${dateNow.getMinutes()} \n`;
+    logMessage = `Logando em: ${day}/${month}/${year} ${dateNow.getHours()}:${dateNow.getMinutes()}> \n`;
     logMessage += content + '\n';
-    logMessage += 'Log end... >';
+    logMessage += 'Fim do Log... >';
 
     fs.appendFile(logFile, logMessage, 'utf8', function(err){ });
 };
 
+let getFilesFromPath = (path, extension) => {
+    let dir = fs.readdirSync( path );
+    return dir.filter( elm => elm.match(new RegExp(`.*\.(${extension})`, 'ig')));
+};
+
 let getNewsUrl = () => {
-    console.log("Crawling to get New's Urls. ");
+    console.log("Checando se existem novas notícias para adquirir.");
     crawlerjs({
         interval: 1000,
         getSample: 'https://br.investing.com/news/forex-news/',
@@ -57,25 +80,28 @@ let getNewsUrl = () => {
             }
         ]
     });
-    setTimeout(getUrlCallback, 5000);
+    setTimeout(getUrlCallback, 20000);
 };
 
 let getUrlCallback = () => {
-    console.log("Crawling to get New's Urls. done!");
-    console.log('Searching for duplicated urls in collection.');
+    console.log("Checagem por novas url de notícia completo!");
+    console.log('Verificando urls duplicadas na coleção. Tamanho da Coleção de Urls: '+ newsUrl.length);
 
     let currentUrls = [], delletions = 0;
     newsUrl.forEach(function(news) {
         let existInNewsUrl = false;
         if(newsToGet.length > 0) {
             newsToGet.forEach(function(notice){
-                if(fs.existsSync(newsDir + notice.name + '.txt') || notice.id === news.id) {
+                if(fs.existsSync(newArticlesDir + notice.name + '.txt') ||
+                   fs.existsSync(sendedArticlesDir + notice.name + '.txt') ||
+                   notice.id === news.id) {
+
                     delletions++;
                     existInNewsUrl = true;
                 }
             });
         } else {
-            if(fs.existsSync(newsDir + news.name + '.txt')) {
+            if(fs.existsSync(newArticlesDir + news.name + '.txt') || fs.existsSync(sendedArticlesDir + news.name + '.txt')) {
                 delletions++;
                 existInNewsUrl = true;
             }
@@ -90,26 +116,31 @@ let getUrlCallback = () => {
             newsToGet.push(notice);
         });
     }
-    console.log('Searching for duplicated urls in collection. done!');
-    console.log("We've got "+ newsUrl.length + " added and "+ delletions+ " ignored.");
+    console.log('Verificação de duplicidade. Finalizada!');
+    console.log("Obtivemos "+ newsUrl.length + " urls adicionadas and "+ delletions+ " removidas.");
     newsUrl = [];
     verifyNewsContent();
 };
 
 let verifyNewsContent = () => {
-    console.log("Verifying NewsToGet collection. ");
+    normalizeNewsToAnalyze();
+    console.log("Verificando coleção de aquisição.");
+
     if(newsToGet.length > 0) {
-        console.log("We have "+ newsToGet.length +" news to get.");
-        setTimeout(getNews, 500);
+        console.log(`${newsToGet.length} urls de aquisição encontradas. Iniciando processo extração.`);
+        setTimeout(getNews, 1000);
+    } else if(newsToAnalyse.length > 0) {
+        console.log(`${newsToAnalyse.length} notícias aguardando por análise. Iniciando envio para análise.`);
+        setTimeout(analyzeFileWatson, 1000);
     } else {
-        console.log("We have no news to get. Configuring new check in 60s.");
+        console.log("Não existem notícias para extrair na coleção. Configurando próxima verificação para 60s.");
         setTimeout(getNewsUrl, 60000);
     }
 };
 
 let getNews = () => {
     if(newsToGet.length > 0) {
-        console.log("Starting queue process to get the actual notice. Queue amount: "+ newsToGet.length);
+        console.log("Iniciando processo de aquisição. Tamanho da fila: "+ newsToGet.length);
         let currentNoticeConfig = newsToGet[newsToGet.length - 1];
         newsToGet.pop();
         crawlerjs({
@@ -121,41 +152,36 @@ let getNews = () => {
                 {
                     selector: '#leftColumn .articlePage',
                     callback: function(err,html,url,response) {
-                        console.log('Crawling: '+ currentNoticeConfig.url);
+                        console.log('Extraindo: '+ currentNoticeConfig.url);
                         let articleText = '',
-                            fileName = newsDir + currentNoticeConfig.name + '.txt';
+                            fileName = newArticlesDir + currentNoticeConfig.name + '.txt';
                         if(!err) {
-                            console.log('Getting page content...');
+                            console.log('Extraindo conteúdo da página.');
                             if(html.find('p').length > 0) {
-                                console.log('Element p found...');
                                 articleText = $.trim(html.find('p').text());
                             } else {
-                                console.log('Element p not found...');
                                 articleText = $.trim(html.text());
                             }
 
                             if(articleText !== '') {
                                 fs.writeFile(fileName, articleText, 'utf8', function(err){
                                    if(err) {
-                                       newsToGet.push(currentNoticeConfig);
-                                       console.log(`Error trying to write notice file: ${err}`);
-                                       console.log('Current notice pushed to NewsToGet ... Ok');
+                                       console.log(`Erro ao tentar escrever arquivo da notícia: ${err}`);
+                                       log(`Erro ao tentar escrever arquivo da notícia: ${err}`);
+                                       preHandleDecision();
                                    } else {
-                                       console.log(`Notice ${fileName} successfully acquired!`);
+                                       newsToAnalyse.push(fileName);
+                                       console.log(`Notícia ${fileName} extraída com sucesso!`);
+                                       preHandleDecision();
                                    }
-
-                                    handleNextStep(true);
                                 });
                             } else {
-                                newsToGet.push(currentNoticeConfig);
-                                console.log('Variable articleText was empty. Pushing back current noticeConfig...');
-                                handleNextStep();
+                                console.log('Texto de extração estava vazio. Ignorando notícia.');
+                                preHandleDecision();
                             }
-                        }else {
-                            newsToGet.push(currentNoticeConfig);
-                            console.log(`Error trying to access notice: ${err}`);
-                            console.log('Current notice pushed to NewsToGet ... Ok');
-                            handleNextStep();
+                        } else {
+                            console.log(`Erro ao tentar acessar a notícia para extração: ${err}`);
+                            preHandleDecision();
                         }
                     }
                 }
@@ -163,19 +189,100 @@ let getNews = () => {
         });
 
     } else {
-        console.log("We have no news to get. Configuring new check in 10s.");
+        preHandleDecision();
+    }
+};
+
+let preHandleDecision = () => {
+    if(newsToGet.length <= 0)
+        handleNextStep();
+    else
+        handleNextStep(false);
+};
+
+let normalizeNewsToAnalyze = () => {
+    let filesWaiting = getFilesFromPath( newArticlesDir, '.txt');
+    filesWaiting.forEach(function(file){
+       let filename = newArticlesDir + file;
+       if(newsToAnalyse.indexOf(filename) === -1) {
+           newsToAnalyse.push(filename);
+       }
+    });
+};
+
+let handleNextStep = (doneGettingNews = true) => {
+    if(!doneGettingNews) {
+        console.log('Próxima extração em 5s.');
+        setTimeout(getNews, 5000);
+        return;
+    }
+
+    normalizeNewsToAnalyze();
+    if(newsToAnalyse.length > 0) {
+        console.log(`Diretório de novas notícias contém ${newsToAnalyse.length} artigos para enviar para análise.`);
+        analyzeFileWatson();
+    } else {
+        console.log('Não há mais notícias para extrair ou analisar. Próxima verificação de urls ocorre em 60s.');
+        setTimeout(getNewsUrl, 60000);
+    }
+};
+
+let analyzeFileWatson = () => {
+    if(newsToAnalyse.length > 0) {
+        console.log(`Enviando arquivos para a Rede Neural. Arquivos na fila: ${newsToAnalyse.length}`);
+
+        let currentFile = newsToAnalyse.pop(),
+            text = fs.readFileSync(currentFile, 'utf8');
+
+
+        if (text === '') {
+            console.log('Erro: Arquivo vazio!');
+            log('Erro: Arquivo vazio!');
+            fs.unlinkSync(file);
+            return;
+        }
+
+        let parameters = {
+            'text': text,
+            'features': {
+                'entities': {},
+                'keywords': {}
+            }
+        };
+
+        console.log('Enviando: ' + currentFile);
+        watson.analyze(parameters, function (err, response) {
+            if (err) {
+                console.log(`Erro ao tentar enviar o arquivo ${currentFile} para análise: ${err}`);
+                log(`Erro ao tentar enviar o arquivo ${currentFile} para análise: ${err}`);
+            } else {
+                let articleID = currentFile.split('-').pop();
+                articleID = articleID.replace('.txt', '.json');
+                fs.writeFile(resultsArticlesDir + articleID, JSON.stringify(response), 'utf8', function(err) {
+                    if(err) {
+                        console.log('Erro ocorrido ao tentar gravar o arquivo json: ' + currentFile);
+                        log('Erro ocorrido ao tentar gravar o arquivo json: ' + currentFile);
+                    } else {
+                        fs.rename(currentFile, sendedArticlesDir + currentFile.split('/').pop(), function(err) {
+                            if(!err) {
+                                console.log('Arquivo de resultados do envio escrito com sucesso.');
+                                handleNextStep();
+                            } else {
+                                console.log('Erro ao tentar mover o arquivo da notícia processada para o diretório de enviadas: ' + err);
+                                log(`Erro ao tentar mover o arquivo da notícia processada para o diretório de enviadas. Arquivo:  ${currentFile} - ${err}`);
+                                handleNextStep();
+                            }
+                        });
+                    }
+                });
+            }
+        });
+
+    } else {
         handleNextStep();
     }
 };
 
-let handleNextStep = (finishGettingNews = false) => {
-    if(newsToGet.length > 0) {
-        console.log('Next notice extract occurs in 10s');
-        setTimeout(getNews, 10000);
-    } else {
-        console.log('No else news to get. Configuring next news verification for 60 from now on.');
-        setTimeout(getNewsUrl, 60000);
-    }
-};
+
 
 getNewsUrl();
